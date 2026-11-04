@@ -1,0 +1,56 @@
+# Géré par le modèle — ne pas modifier ici (docs/modele/methode.md).
+name: modele-image-construire
+description: >-
+  Construit l'image du Dockerfile du projet (essai-naissance:ci, à la révision du commit), la lance comme
+  en production et la vérifie par deploiement/ci/verifier-image.sh. Le conteneur essai-naissance reste
+  lancé pour les étapes suivantes du job (les tests de bout en bout du projet) ; le job le supprime.
+inputs:
+  dossier:
+    description: Le dossier du projet, où s'exécutent toutes les étapes
+    required: false
+    default: "."
+  variables:
+    description: >-
+      Variables de l'app, une ligne CLE=valeur chacune (la clé en majuscules), passées au conteneur
+      par -e
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Construire l'image
+      shell: bash
+      working-directory: ${{ inputs.dossier }}
+      run: docker build --build-arg REVISION="$GITHUB_SHA" -t essai-naissance:ci .
+
+    # Comme en production (deploiement/compose.yml) : utilisateur 1000, système de fichiers en
+    # lecture seule, /tmp en mémoire et le port publié sur la boucle locale seulement. /donnees,
+    # monté en production, est ici un volume anonyme, que Docker remplit de ce que l'image y a mis :
+    # l'app y écrit comme sur le serveur.
+    - name: Lancer l'image
+      shell: bash
+      working-directory: ${{ inputs.dossier }}
+      env:
+        VARIABLES: ${{ inputs.variables }}
+      run: |
+        # Une ligne invalide arrête tout, sans être répétée : elle peut porter un secret.
+        options=()
+        numero=0
+        while IFS= read -r ligne || [ -n "$ligne" ]; do
+          numero=$((numero + 1))
+          [ -n "$ligne" ] || continue
+          if ! [[ "$ligne" =~ ^[A-Z][A-Z0-9_]*= ]]; then
+            echo "::error::variables, ligne $numero : attendu CLE=valeur, la clé en majuscules (la ligne n'est pas répétée)"
+            exit 1
+          fi
+          options+=(-e "$ligne")
+        done <<<"$VARIABLES"
+        docker run -d --name essai-naissance -p 127.0.0.1:3000:3000 \
+          -e ESSAI_NAISSANCE_ENV=ci -e ESSAI_NAISSANCE_URL_PUBLIQUE=http://localhost:3000 \
+          --user 1000:1000 --read-only --tmpfs /tmp -v /donnees \
+          "${options[@]}" essai-naissance:ci
+
+    - name: Vérifier l'image
+      shell: bash
+      working-directory: ${{ inputs.dossier }}
+      run: bash deploiement/ci/verifier-image.sh essai-naissance "$GITHUB_SHA"

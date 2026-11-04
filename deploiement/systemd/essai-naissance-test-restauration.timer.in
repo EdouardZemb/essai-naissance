@@ -1,0 +1,11 @@
+# Rendu de deploiement/systemd/essai-naissance-test-restauration.timer.in par deploiement/installer-unites.sh.
+# Ne pas modifier à la main : la sonde de prod alerte au moindre écart avec ce rendu.
+[Unit]
+Description=essai-naissance : minuterie du test de restauration (@ENV@)
+
+[Timer]
+OnCalendar=@HEURE_TEST@
+Persistent=true
+
+[Install]
+WantedBy=timers.target
